@@ -1,0 +1,187 @@
+---
+title: "Analysis of Data Scientist jobs - Data Cleaning"
+author: "Cecilia"
+date: "12/17/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+#import the data, check the variables
+library(stringr)
+library(readr)
+library(sqldf)
+library(dplyr)
+library(tidyr)
+library(tm)
+library(NLP)
+library(wordcloud)
+library(wordcloud2)
+library(RColorBrewer)
+library(ggplot2)
+library(forcats)
+DataScientist <- read_csv(file = "https://github.com/Cecilia0401/DataScientist/raw/main/DataScientist.csv")
+str(DataScientist)
+```
+
+## Data cleaning
+
+```{r data cleaning}
+
+#Drop the columns of Competitors, Easy Apply, Revenue, Founded
+DataScientist = subset(DataScientist, select = -c( Competitors,`Easy Apply`,Revenue, Founded ))
+
+#Rename the left columns
+DataScientist = DataScientist %>% rename(title = `Job Title`,
+                                           salary =  `Salary Estimate`,
+                                           jd = `Job Description`,
+                                         company = `Company Name`,
+                                         hq = Headquarters,
+                                         ownership = `Type of ownership`,
+                                        rating = Rating,
+                                        location = Location,
+                                        size = Size,
+                                        industry = Industry,
+                                        sector = Sector
+                                         )
+
+#Delete rows with na
+DataScientist1 <- na.omit(DataScientist)
+
+DataScientist1 <- DataScientist1[!(DataScientist1$rating==-1 |DataScientist1$sector==-1 | DataScientist1$industry==-1),]
+
+#Salary - delete the parentheses
+DataScientist$salary <- str_replace_all(DataScientist$salary,"\\((.*?)\\)","")
+
+#Salary - create a numeric salary column 
+DataScientist1 <- DataScientist1 %>% separate(salary, c("min","max"), "-") 
+number1 <- str_extract(DataScientist1$min,"[0-9]+") %>% as.numeric()
+number2 <- str_extract(DataScientist1$max,"[0-9]+") %>% as.numeric()
+DataScientist1 <- DataScientist1 %>% mutate(salary1 = (number1 + number2)/2)
+pattern <- str_detect(DataScientist1$max,"Per Hour")
+DataScientist1$salary1 <- ifelse(pattern == TRUE, (number1 + number2)/2*40*52/1000, DataScientist1$salary1)
+
+
+#Delete the number in the comapny names 
+number <- str_extract(DataScientist1$company,"[[:digit:]]+.+[[:digit:]]")
+DataScientist1$"company" <- str_replace(DataScientist1$"company",number, replacement = "")
+
+
+
+#Clean the job title column
+
+DataScientist1 <- DataScientist1 %>% 
+    mutate( ds = str_detect(title, ".*(Scientist|Science).*$"),
+            ba = str_detect(title, ".*(Business).*$"),
+            qr = str_detect(title, ".*(Researcher|Reserch).*$"),
+            da = str_detect(title, ".*(Analyst|Analysis).*$"),
+            de = str_detect(title, ".*(Engineer).*$")
+            )
+
+DataScientist1 <- DataScientist1 %>% 
+    mutate(category = ifelse(de == TRUE, "Data Engineer",
+           ifelse(ds == TRUE,"Data Scientist",
+           ifelse(da == TRUE, "Data Analyst",
+           ifelse(ba == TRUE, "Business Analyst",
+           ifelse(qr == TRUE, "Quantitative Researcher", "Other")))))
+           )
+
+#Clean the location and hq columns
+DataScientist1 <- DataScientist1 %>% separate(location, c("locaitonc","locations"), ",") 
+DataScientist1 <- DataScientist1 %>% separate(hq, c("hqc","hqs"), ",") 
+
+DataScientist1 <- DataScientist1 %>% separate(size, c("size1","size2"), "to") 
+DataScientist1$size1 <- str_extract(DataScientist1$size1,"[0-9]+") %>% as.numeric()
+DataScientist1$size2 <- str_extract(DataScientist1$size2,"[0-9]+") %>% as.numeric()
+
+#Visualization of job category
+data_sorted <- DataScientist1 %>% 
+  group_by(category) %>% 
+  summarise(count = n()) %>% 
+  mutate(category = fct_reorder(category, count))
+
+  v= ggplot() + geom_bar(data = data_sorted, aes(x = category, y = count),
+                    stat = "identity")+
+  coord_flip()+
+  theme_bw(base_size=10)+
+  scale_linetype_manual()
+
+  v
+```
+
+
+##Create a word cloud
+
+Build a corpus for text mining
+```{r}
+wcdf <- DataScientist1
+as.character(wcdf$jd)
+jd1=str_replace_all(wcdf$jd,"[^[:alpha:]]", " ") 
+corp <- Corpus(VectorSource(jd1))
+inspect(corp)
+```
+
+
+
+Clean and pre-process the text data
+```{r}
+corp <- tm_map(corp, removeNumbers)
+corp<- tm_map(corp, removePunctuation)
+corp <- tm_map(corp, stripWhitespace) 
+corp<- tm_map(corp, tolower) #transform into low case
+corp <- tm_map(corp, removeWords, stopwords("english")) 
+corp<- tm_map(corp,removeWords, c("experience","we","and","data",,"job", "will", "work","part", "required", "employment", "use", "years", "using", "skills" ))#remove your own stop word
+inspect(corp)
+```
+
+Generate the spreadsheet representation of the documents.
+```{r}
+tdm <- DocumentTermMatrix(corp)
+inspect(tdm)
+```
+
+
+```{r}
+m <- as.matrix(tdm)
+# find out the importance of each term by summing up the tf-idf scores over the corpus
+importance <- data.frame(sort(colSums(m),decreasing=TRUE))
+set.seed(111)
+wordcloud(rownames(importance), importance[,1], max.words=400, random.order=FALSE, rot.per=0.35,colors=brewer.pal(8, "Dark2"))
+
+```
+
+```{r}
+text <- DataScientist1$jd
+
+docs <- Corpus(VectorSource(text))
+
+docs <- docs %>%
+  tm_map(removeNumbers) %>%
+  tm_map(removePunctuation) %>%
+  tm_map(stripWhitespace)
+docs <- tm_map(docs, content_transformer(tolower))
+docs <- tm_map(docs, removeWords, stopwords("english"))
+
+dtm <- TermDocumentMatrix(docs) 
+matrix <- as.matrix(dtm) 
+words <- sort(rowSums(matrix),decreasing=TRUE) 
+df <- data.frame(word = names(words),freq=words)
+
+set.seed(1234) # for reproducibility 
+wordcloud(words = df$word, freq = df$freq, min.freq = 1,          
+          max.words=200, random.order=FALSE, rot.per=0.35,           
+          colors=brewer.pal(8, "Dark2"))
+```
+
+```{r}
+wordcloud2(data=df, size=1.6, color='random-dark')
+```
+
+```{r export the data}
+DataScientist1 <- subset(DataScientist1, select = -c( jd ))
+write.csv(DataScientist1,"/Users/liangziang/Desktop/practice/data/DataScientist1", row.names = FALSE)
+```
+
+
+
+
+

@@ -178,7 +178,7 @@ wordcloud2(data=df, size=1.6, color='random-dark')
 
 ```{r export the data}
 DataScientist1 <- subset(DataScientist1, select = -c( jd ))
-write.csv(DataScientist1,"/Users/liangziang/Desktop/practice/data/DataScientist1", row.names = FALSE)
+write.csv(DataScientist1,"/../practice/data/DataScientist1", row.names = FALSE)
 ```
 
 
